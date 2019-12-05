@@ -1,0 +1,14 @@
+.floydexpt
+.floydignore
+.vscode/
+data
+floyd.yml
+floyd_requirements.txt
+src/__pycache__/energy_data.cpython-36.pyc
+src/__pycache__/feature_builder.cpython-36.pyc
+src/__pycache__/regressor.cpython-36.pyc
+src/__pycache__/transformers.cpython-36.pyc
+src/__pycache__/constants.cpython-36.pyc
+src/catboost_info/
+src/constants.pyc
+
