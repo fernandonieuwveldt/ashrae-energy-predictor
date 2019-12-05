@@ -1,5 +1,5 @@
 from sklearn.base import RegressorMixin
-from sklearn.ensemble import RandomForestRegressor, BaggingRegressor
+from sklearn.ensemble import RandomForestRegressor, BaggingRegressor, AdaBoostRegressor
 import pandas
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor, Pool
@@ -7,9 +7,10 @@ import numpy
 from sklearn.model_selection import KFold
 from collections import defaultdict
 from feature_builder import EnergyFeatureBuilder
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, LassoCV
 from constants import TARGET, OUTPUT_DIR
-
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsRegressor
 
 class KaggleSubmitMixin:
     """
@@ -188,7 +189,7 @@ class KFoldModel(RegressorMixin, KaggleSubmitMixin):
     _SEED = 1
     _SPLITS = 5
 
-    def __init__(self, n_estimators=500, split_feature='card6'):
+    def __init__(self, n_estimators=500, split_feature=''):
         self.n_estimators = n_estimators
         self.regressor = None
         self.split_estimators = defaultdict(list)
@@ -213,13 +214,13 @@ class KFoldModel(RegressorMixin, KaggleSubmitMixin):
         folds = KFold(n_splits=self._SPLITS, shuffle=True)
         for fold_n, (train_index, valid_index) in enumerate(folds.split(xtrain)):
             self.regressor = XGBRegressor(n_estimators=10,
-                                            max_depth=9,
-                                            learning_rate=0.048,
-                                            subsample=0.85,
-                                            colsample_bytree=0.85,
-                                            reg_alpha=0.15,
-                                            reg_lamdba=0.85,
-                                            n_jobs=-1)
+                                          max_depth=9,
+                                          learning_rate=0.048,
+                                          subsample=0.85,
+                                          colsample_bytree=0.85,
+                                          reg_alpha=0.15,
+                                          reg_lamdba=0.85,
+                                          n_jobs=-1)
             x_train_, x_valid = xtrain[train_index, :], xtrain[valid_index, :]
             y_train_, y_valid = ytrain[train_index], ytrain[valid_index]
             eval_set = [(x_valid, y_valid)]
@@ -252,7 +253,7 @@ class ClusteredXGBModel(RegressorMixin, KaggleSubmitMixin):
 
     """
     _SEED = 1
-    _SPLITS = 2
+    _SPLITS = 5
 
     def __init__(self, split_feature=None):
         self.split_estimators = defaultdict(list)
@@ -286,30 +287,32 @@ class ClusteredXGBModel(RegressorMixin, KaggleSubmitMixin):
                 x_train_, x_valid = group_features[train_index, :], group_features[valid_index, :]
                 y_train_, y_valid = group_target[train_index], group_target[valid_index]
 
-                # estimator = Lasso(alpha=0.5)
-                # estimator =  RandomForestRegressor(n_estimators=5, max_depth=3, n_jobs=-1)  # Lasso(alpha=0.25)
-                # estimator.fit(x_train_, y_train_)
+                # estimator = Lasso(alpha=0.1)
+                estimator =  RandomForestRegressor(n_estimators=20, max_depth=5, n_jobs=-1)  # Lasso(alpha=0.25)
+                # estimator = AdaBoostRegressor(base_estimator=DecisionTreeRegressor(max_depth=3), n_estimators=5)
+                # estimator = KNeighborsRegressor(n_neighbors=5)
+                estimator.fit(x_train_, y_train_)
 
-                nr_cat_features = int(numpy.sum(xtrain.max(axis=0) == 1))
-                cat_features = list(range(nr_cat_features))
-                train_data = Pool(data=x_train_,
-                                  label=y_train_,
-                                  cat_features=cat_features)
-                valid_data = Pool(data=x_valid,
-                                  label=y_valid,
-                                  cat_features=cat_features)
-                params = {'loss_function': 'RMSE',
-                          'eval_metric': 'RMSE',
-                          'cat_features': cat_features,
-                          'iterations': 100,
-                          'verbose': 10,
-                          'max_depth': 3,
-                          'random_seed': self._SEED,
-                          'od_type': "Iter",
-                          }
+                # nr_cat_features = int(numpy.sum(xtrain.max(axis=0) == 1))
+                # cat_features = list(range(nr_cat_features))
+                # train_data = Pool(data=x_train_,
+                #                   label=y_train_,
+                #                   cat_features=cat_features)
+                # valid_data = Pool(data=x_valid,
+                #                   label=y_valid,
+                #                   cat_features=cat_features)
+                # params = {'loss_function': 'RMSE',
+                #           'eval_metric': 'RMSE',
+                #           'cat_features': cat_features,
+                #           'iterations': 100,
+                #           'verbose': 10,
+                #           'max_depth': 3,
+                #           'random_seed': self._SEED,
+                #           'od_type': "Iter",
+                #           }
                           
-                estimator = CatBoostRegressor(**params)
-                estimator.fit(train_data, eval_set=valid_data)
+                # estimator = CatBoostRegressor(**params)
+                # estimator.fit(train_data, eval_set=valid_data)
 
                 self.split_estimators[name].append(estimator)
                 self.split_transformers[name].append(group_transformer)

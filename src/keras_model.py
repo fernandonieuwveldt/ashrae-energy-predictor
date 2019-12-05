@@ -1,84 +1,71 @@
 import pandas
 import tensorflow
+import keras
+import numpy
 from keras.models import Model, load_model
-from keras.layers import Input, Dense, Concatenate, Reshape, Dropout
+from keras.layers import Input, Dense, Concatenate, Reshape, Dropout, BatchNormalization
 from keras.layers.embeddings import Embedding
 from keras.callbacks import EarlyStopping
 from keras.callbacks import ModelCheckpoint
 from keras import optimizers
-import keras
-from transformers import TypeSelector
-from feature_extractor import FraudFeatureExtractor
-from utils import cast_to_type
+from feature_builder import EnergyFeatureBuilder
+from keras import backend as K
+from keras.losses import mean_squared_error as mse_loss
+from constants import EMBEDDING_FEATURES, NUMERICAL_FEATURES, CATEGORICAL_FEATURES, TARGET
+from sklearn.pipeline import FeatureUnion, Pipeline
+from transformers import NumericalTransformer, CategoricalTransformer, GroupSelector, \
+    EmbeddingTransformer, MultiColumnLabelEncoder, EmbeddingTransformer, TypeSelector
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedKFold
 
 tensorflow.logging.set_verbosity(tensorflow.logging.ERROR)
 config = tensorflow.ConfigProto(device_count={"CPU": 8})
 keras.backend.tensorflow_backend.set_session(tensorflow.Session(config=config))
 
 
-class EmbeddingBasedClassifier:
+def root_mean_squared_error(y_true, y_pred):
+    return K.sqrt(K.mean(K.square(y_pred - y_true), axis=0))
+
+
+class EmbeddingBasedRegressor:
     """
     Model based on embedding layers for categorical features
 
     """
     EPOCHS = 10
-    OPTIMIZER = optimizers.SGD(lr=0.03, nesterov=True)
+    OPTIMIZER = optimizers.Adam(lr=0.001)
     EMBEDDING_RATIO = 0.25
-    MAX_EMBEDDING = 50
-    BATCH_SIZE = 256
+    MAX_EMBEDDING = 7
+    BATCH_SIZE = 1024
     VERBOSE = 0
 
-    ES_PARAMS = {'monitor': 'val_loss',
+    ES_PARAMS = {'monitor': 'val_root_mean_squared_error',
                  'mode': 'min',
                  'verbose': 1,
-                 'patience': 20}
+                 'patience': 3}
 
-    MC_PARAMS = {'filepath': '../data/saved_models/best_model.h5',
-                 'monitor': 'val_loss',
+    MC_PARAMS = {'filepath': 'best_model.h5',
+                 'monitor': 'val_root_mean_squared_error',
                  'mode': 'min',
                  'verbose': 1,
                  'save_best_only': True}
+    FOLDS = 2
+    SEED = 42
 
     def __init__(self):
         self.early_stopping = EarlyStopping(**self.ES_PARAMS)
         self.model_checkpoint = ModelCheckpoint(**self.MC_PARAMS)
-        self.transformer = FraudFeatureExtractor(with_embedding=True)
-        self.inputs = []
-        self.layers = []
+        self.transformer = None
         self.classifier = None
         self.model = None
         self.feature_category_mapper = None
         self.feature_mode = None
         self.embedding_output_mapper = None
-
-    def embedding_mapper(self, data_frame=None):
-        """
-        Extract candidate embedding features and create mapper of number unique entries and mapper for output dimension
-
-        :param data_frame: data frame
-        :return: tuple (list of embedding features, dictionary with nr unique entries, output dimension)
-        """
-        cat_data_frame = TypeSelector(type='object').transform(data_frame)
-
-        numeric_features = list(data_frame.dtypes[data_frame.dtypes == 'float64'].index)
-        categoric_features = list(cat_data_frame.columns)
-        embedding_features = list(cat_data_frame.loc[:, cat_data_frame.nunique() > 2].columns)
-
-        # remove embedding features from categoric features
-        categoric_features = set(categoric_features) - set(embedding_features)
-
-        feature_mode = {feature: cat_data_frame[feature].nunique()+1 for feature in embedding_features}
-        embedding_output_mapper = {feature: min(int(feature_mode[feature] * self.EMBEDDING_RATIO)+2, self.MAX_EMBEDDING)
-                                   for feature in embedding_features}
-
-        feature_category_mapper = {'numeric_features': numeric_features,
-                                   'categoric_features': list(categoric_features),
-                                   'embedding_features': embedding_features}
-
-        return feature_category_mapper, feature_mode, embedding_output_mapper
+        self.models = []
 
     @staticmethod
-    def preproc_embedding_layer(data_frame=None, feature_category_mapper=None):
+    def preproc_embedding_layer(data_frame=None):
         """
         Creates new unique ordinal mapping to feed to embedding layer and create proper format for Keras model
 
@@ -86,22 +73,36 @@ class EmbeddingBasedClassifier:
         :param feature_category_mapper:
         :return: list of preprocessed data frames
         """
-        unique_values = {feature: data_frame[feature].unique() for feature in feature_category_mapper['embedding_features']}
-        value_mapper = {ek: dict(map(lambda x: (x[1], x[0]), enumerate(unique_values[ek])))
-                        for ek in feature_category_mapper['embedding_features']}
-
-        preproc_embedding = [data_frame[c].map(value_mapper[c]).values for c in feature_category_mapper['embedding_features']]
-        preproc_categorical = data_frame.loc[:, feature_category_mapper['categoric_features']].values
-        preproc_numerical = data_frame.loc[:, feature_category_mapper['numeric_features']].values
+        preproc_embedding = [data_frame[c].values for c in EMBEDDING_FEATURES]
+        preproc_numerical = data_frame[NUMERICAL_FEATURES].values
 
         # unpack
         train_data = []
         for pe in preproc_embedding:
             train_data.append(pe)
-        train_data.append(preproc_categorical)
         train_data.append(preproc_numerical)
 
         return train_data
+
+    @staticmethod
+    def _feature_transformer():
+        """
+        """
+        pipeline_steps = []
+
+        embedding_pipeline = Pipeline(steps=[('feature_selector', GroupSelector(EMBEDDING_FEATURES)),
+                                             ('encode_features', MultiColumnLabelEncoder())])
+        pipeline_steps.append(('embedding_pipeline', embedding_pipeline))
+
+        numerical_pipeline = Pipeline(steps=[('feature_selector', GroupSelector(NUMERICAL_FEATURES)),
+                                             ('numeric_features', NumericalTransformer()),
+                                             ('imputer', SimpleImputer(strategy='median')),
+                                             ('scaler', StandardScaler()),
+                                            ])
+        pipeline_steps.append(('numerical_pipeline', numerical_pipeline))
+
+        transformer_pipeline = FeatureUnion(transformer_list=pipeline_steps)
+        return transformer_pipeline
 
     @staticmethod
     def create_embedding_layer(n_unique=None, output_dim=None, input_length=1):
@@ -118,14 +119,7 @@ class EmbeddingBasedClassifier:
         _embedding = Reshape(target_shape=(output_dim, ))(_embedding)
         return _input, _embedding
 
-    def load_data(self):
-        """
-        Loads data
-
-        :return:
-        """
-
-    def build_network(self, feature_category_mapper=None, feature_mode=None, embedding_output_mapper=None):
+    def build_network(self, data_frame):
         """
         Build up network with all embedding and other(numeric) layers
 
@@ -134,41 +128,45 @@ class EmbeddingBasedClassifier:
         :param embedding_output_mapper:
         :return: compiled keras model
         """
-        # add embedding layers
-        if feature_category_mapper['embedding_features'] is not None:
-            for feature in feature_category_mapper['embedding_features']:
-                embedding_input, embedding_layer = self.create_embedding_layer(feature_mode[feature],
-                                                                               embedding_output_mapper[feature])
-                self.inputs.append(embedding_input)
-                self.layers.append(embedding_layer)
+        inputs = []
+        layers = []
 
-        # add layer for other categoric features that are not embedding features
-        if feature_category_mapper['categoric_features'] is not None:
-            categorical_input = Input(shape=(len(feature_category_mapper['categoric_features']), ))
-            categoric_layer = Dense(50)(categorical_input)
-            self.inputs.append(categorical_input)
-            self.layers.append(categoric_layer)
+        for feature in EMBEDDING_FEATURES:
+            print(feature)
+            unique_categories = data_frame[feature].nunique()+1
+            embedding_input, embedding_layer = self.create_embedding_layer(unique_categories,
+                                                                           min(int(unique_categories*self.EMBEDDING_RATIO)+1, self.MAX_EMBEDDING))
+            inputs.append(embedding_input)
+            layers.append(embedding_layer)
+        
+        concat_embedding_layer = Concatenate()(layers)
+        concat_embedding_layer = Dropout(0.1)(Dense(64,activation='relu')(concat_embedding_layer))
+        concat_embedding_layer = BatchNormalization()(concat_embedding_layer)
+        concat_embedding_layer = Dropout(0.1)(Dense(32,activation='relu')(concat_embedding_layer))
 
         # add layer for other numeric features
-        if feature_category_mapper['numeric_features'] is not None:
-            numeric_input = Input(shape=(len(feature_category_mapper['numeric_features']), ))
-            numeric_layer = Dense(50)(numeric_input)
-            self.inputs.append(numeric_input)
-            self.layers.append(numeric_layer)
+        numeric_input = Input(shape=(len(NUMERICAL_FEATURES), ))
+        numeric_layer = Dense(len(NUMERICAL_FEATURES))(numeric_input)
 
-        x = Concatenate()(self.layers)
-        x = Dense(256, activation='relu')(x)
-        x = Dropout(0.05)(x)
-        x = Dense(128, activation='relu')(x)
-        x = Dropout(0.1)(x)
-        x = Dense(10, activation='relu')(x)
-        output = Dense(1, activation='sigmoid')(x)
+        inputs.append(numeric_input)
+        layers.append(numeric_layer)
+        
+        x = Concatenate()([concat_embedding_layer, numeric_layer])
+        x = Dense(32, activation='relu')(concat_embedding_layer)
+        x = BatchNormalization()(x)
+        x = Dropout(0.2)(x)
 
-        model = Model(self.inputs, output)
-        model.compile(loss='binary_crossentropy', optimizer=self.OPTIMIZER,  metrics=['acc'])
+        x = Dense(16, activation='relu')(x)
+        x = BatchNormalization()(x)
+        x = Dropout(0.2)(x)
+        output = Dense(1, activation='relu')(x)
+
+        model = Model(inputs, output)
+        model.compile(loss=mse_loss, optimizer=self.OPTIMIZER,  metrics=[root_mean_squared_error])
+
         return model
 
-    def fit(self, x_train=None, y_train=None, x_val=None, y_val=None):
+    def _fit_single_set(self, x_train=None, y_train=None, x_val=None, y_val=None):
         """
         Fit neural net model
 
@@ -178,36 +176,99 @@ class EmbeddingBasedClassifier:
         :param y_val: validation targets
         :return:
         """
-        self.transformer.fit(x_train, y_train)
+        
+        self.transformer = self._feature_transformer()
+        self.transformer.fit(x_train)
+
         x_train = self.transformer.transform(x_train)
         x_val = self.transformer.transform(x_val)
 
-        # have to convert numpy to pandas
-        onehot_pipe = self.transformer.mapper.transformer_list[0][1][1]
-        embedding_pipe = self.transformer.mapper.transformer_list[1][1][1]
-        self.nr_cat_features = sum([len(elem) for elem in onehot_pipe.categories_]) + \
-                               len(embedding_pipe.embedding_candidates)
+        x_train = pandas.DataFrame(x_train, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
+        x_val = pandas.DataFrame(x_val, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
 
-        x_train, x_val = cast_to_type(x_train, x_val, self.nr_cat_features)
+        self.regressor = self.build_network(x_train)
 
-        self.feature_category_mapper, self.feature_mode, self.embedding_output_mapper = self.embedding_mapper(x_train)
+        x_train = self.preproc_embedding_layer(x_train)
+        x_val = self.preproc_embedding_layer(x_val)
 
-        self.classifier = self.build_network(self.feature_category_mapper,
-                                             self.feature_mode,
-                                             self.embedding_output_mapper)
-
-        x_train_preproc = self.preproc_embedding_layer(x_train, self.feature_category_mapper)
-        x_val_preproc = self.preproc_embedding_layer(x_val, self.feature_category_mapper)
-
-        params = {'x': x_train_preproc,
+        params = {'x': x_train,
                   'y': y_train,
-                  'validation_data': (x_val_preproc, y_val),
+                  'validation_data': (x_val, y_val),
                   'batch_size': self.BATCH_SIZE,
                   'epochs': self.EPOCHS,
                   'verbose': self.VERBOSE,
                   'callbacks': [self.early_stopping, self.model_checkpoint]}
+        self.regressor.fit(**params)
 
-        self.classifier.fit(**params)
+        del x_train
+        del x_val
+
+    def fit(self, x_train=None, y_train=None):
+        self.transformers = []
+        self.estimators = []
+
+        kf = StratifiedKFold(n_splits=self.FOLDS, shuffle=True, random_state=self.SEED)
+        for fold_n, (train_index, valid_index) in enumerate(kf.split(x_train, x_train['building_id'])):
+            early_stopping_kwargs = {'monitor': 'val_root_mean_squared_error',
+                                     'mode': 'min',
+                                     'verbose': 1,
+                                     'patience': 3}
+
+            model_checkpoint_kwargs = {'filepath': f"best_model_{fold_n}.h5",
+                                       'monitor': 'val_root_mean_squared_error',
+                                       'mode': 'min',
+                                       'verbose': 1,
+                                       'save_best_only': True}
+
+            early_stopping = EarlyStopping(**early_stopping_kwargs)
+            model_checkpoint = ModelCheckpoint(**model_checkpoint_kwargs)
+
+            x_train_, x_val = x_train.iloc[train_index], x_train.iloc[valid_index]
+            y_train_, y_val = y_train.iloc[train_index], y_train.iloc[valid_index]
+
+            transformer = self._feature_transformer()
+            transformer.fit(x_train_)
+
+            x_train_ = transformer.transform(x_train_)
+            x_val = transformer.transform(x_val)
+
+            x_train_ = pandas.DataFrame(x_train_, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
+            x_val = pandas.DataFrame(x_val, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
+
+            estimator = self.build_network(x_train_)
+
+            x_train_ = self.preproc_embedding_layer(x_train_)
+            x_val = self.preproc_embedding_layer(x_val)
+
+            model_kwargs = {'x': x_train_,
+                            'y': y_train_,
+                            'validation_data': (x_val, y_val),
+                            'batch_size': self.BATCH_SIZE,
+                            'epochs': self.EPOCHS,
+                            'verbose': self.VERBOSE,
+                            'callbacks': [early_stopping, model_checkpoint]}
+            estimator.fit(**model_kwargs)
+
+            # record transformer and estimator
+            self.transformers.append(transformer)
+            self.estimators.append(estimator)
+
+        del x_train, x_train_, x_val 
+
+
+    def predict_single_model(self, x_test=None):
+        """
+        Loads best model for prediction
+
+        :param x_test:
+        :return:
+        """
+        x_test = self.transformer.transform(x_test)
+        x_test = pandas.DataFrame(x_test, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
+
+        x_test = self.preproc_embedding_layer(x_test)
+        saved_model = load_model(self.MC_PARAMS['filepath'], custom_objects={'root_mean_squared_error': root_mean_squared_error})
+        return saved_model.predict(x_test)
 
     def predict(self, x_test=None):
         """
@@ -216,14 +277,15 @@ class EmbeddingBasedClassifier:
         :param x_test:
         :return:
         """
-        x_test = self.transformer.transform(x_test)
-        x_test, _ = cast_to_type(x_test, x_test, self.nr_cat_features)
+        predictions = numpy.zeros((x_test.shape[0], 1))
+        for s in range(self.FOLDS):
+            x_test_transformed = self.transformers[s].transform(x_test)
+            x_test_transformed = pandas.DataFrame(x_test_transformed, columns=EMBEDDING_FEATURES+NUMERICAL_FEATURES)
+            x_test_transformed = self.preproc_embedding_layer(x_test_transformed)
+            predictions += self.estimators[s].predict(x_test_transformed) / self.FOLDS
+        return predictions
 
-        x_test_preproc = self.preproc_embedding_layer(x_test, self.feature_category_mapper)
-        saved_model = load_model(self.MC_PARAMS['filepath'])
-        return saved_model.predict(x_test_preproc)
-
-    def submit(self, xtest=None, trans_ids=None):
+    def submit(self, xtest=None, ids=None):
         """
         Saves prediction outputs in kaggle submission file format
 
@@ -231,8 +293,8 @@ class EmbeddingBasedClassifier:
         :param trans_ids: transaction ids
         :return: saved kaggle file format
         """
-        test_predictions = self.predict(xtest)
+        test_predictions = numpy.expm1(self.predict(xtest))
         my_submission_file = pandas.DataFrame()
-        my_submission_file['TransactionID'] = trans_ids
-        my_submission_file['isFraud'] = test_predictions
-        my_submission_file.to_csv('../data/output_data/submission.csv', index=False)
+        my_submission_file['row_id'] = ids
+        my_submission_file[TARGET] = numpy.round_(test_predictions, decimals=4, out=None)
+        my_submission_file.to_csv('submission.gz', index=False, compression='gzip')

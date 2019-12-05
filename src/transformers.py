@@ -4,6 +4,28 @@ from sklearn.decomposition import PCA
 import numpy
 
 
+class TypeSelector(TransformerMixin):
+    """
+    Transformer that select columns based on type or from list of names
+
+    """
+    def __init__(self, type=None):
+        self.type = type
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X, y=None):
+        """
+        Select only features of specified type
+
+        :param X: pandas data_frame
+        :param y: None
+        :return: pandas data_frame only containing features of specified type
+        """
+        features = X.dtypes[X.dtypes == self.type].index
+        return X[features]
+        
 class CategoricalTransformer(BaseEstimator, TransformerMixin):
     """
     Transformer extracting categorical features and engineer new ones
@@ -19,8 +41,8 @@ class CategoricalTransformer(BaseEstimator, TransformerMixin):
         # xc['meter_primary_use'] = xc['meter'].map(lambda s:str(s)+'_') + xc['primary_use']
         # xc['site_primary_use'] = xc['site_id'].map(lambda s:str(s)+'_') + xc['primary_use']
         # xc['site_meter'] = xc['site_id'].map(lambda s:str(s)+'_') + xc['meter'].map(str)
-
-        xc = xc.fillna(-999)
+        #x_snipped = TypeSelector(type='object').transform(xc_copy).fillna('Unknown').astype('str')
+        xc = xc.fillna(-999).astype('str')
         return xc
 
 
@@ -153,4 +175,40 @@ class AutoPCA(TransformerMixin):
 
     def transform(self, X, y=None):
         return self.pca.transform(X)[:, :self.opt_ncomponents]
+
+
+class GroupTransformer(TransformerMixin):
+    def __init__(self, feature=None, transformer=None, **kwargs):
+        self.feature = feature
+        self.transformer = transformer
+        self.kwargs = kwargs
+
+    def fit(self, X, y=None):
+        """
+        """
+        self.group_transform_ = {}
+        for _id, group in X.groupby(self.feature):
+            self.group_transform_[_id] = self.transformer(**self.kwargs).fit(X, y)
+        return self
+
+    def transform(self, X, y=None):
+        for _id, group in X.groupby(self.feature):
+            group_indices = X[self.feature]==_id
+            X[group_indices, :] = self.group_transform_[_id].transform(X[group_indices, :])
+        return X
+
+
+class GroupImputer(GroupTransformer):
+    def __init__(self, feature=None, imputer=SimpleImputer, **kwargs):
+        super().__init__(feature=feature,
+                         transformer=imputer,
+                         **kwargs
+                         )
+
+
+class GroupScaler(GroupTransformer):
+    def __init__(self, feature=None, scaler=StandardScaler, **kwargs):
+        super().__init__(feature=feature,
+                         transformer=scaler,
+                         **kwargs)
 

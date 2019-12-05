@@ -25,12 +25,6 @@ class EnergyFeatureBuilder(TransformerMixin):
                                                ])
         pipeline_steps.append(('categorical_pipeline', categorical_pipeline))
 
-        if self.with_embedding:
-            embedding_pipeline = Pipeline(steps=[('feature_selector', GroupSelector(EMBEDDING_FEATURES)),
-                                                 #('categorical_features', EmbeddingTransformer()),
-                                                 ('encode_features', MultiColumnLabelEncoder())])
-            pipeline_steps.append(('embedding_pipeline', embedding_pipeline))
-
         numerical_pipeline = Pipeline(steps=[('feature_selector', GroupSelector(NUMERICAL_FEATURES)),
                                              ('numeric_features', NumericalTransformer()),
                                              ('imputer', SimpleImputer(strategy='mean')),
