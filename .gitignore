@@ -11,4 +11,7 @@ src/__pycache__/transformers.cpython-36.pyc
 src/__pycache__/constants.cpython-36.pyc
 src/catboost_info/
 src/constants.pyc
+*.h5
+*.pyc
+*.gz
 
