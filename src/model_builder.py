@@ -12,7 +12,6 @@ warnings.filterwarnings('ignore')
 
 
 def embedding_model():
-    # data = DataSplitter()
     reg = EmbeddingBasedRegressor()
 
     energy = AshreaEnergyData()
@@ -20,19 +19,12 @@ def embedding_model():
     samples = energy.data.drop(TARGET, axis=1)
     print('data loaded')
 
-    # data.y_train = numpy.log1p(data.y_train)
-    # data.y_test = numpy.log1p(data.y_test)
-    # reg.fit(data.X_train, data.y_train, data.X_test, data.y_test) 
     reg.fit(samples, target)
 
-    # del data.X_train
-    # del data.X_test
+
     energy_test = AshreaEnergyTestData()
     reg.submit(energy_test.data, energy_test.data['row_id'])
 
-    # if os.environ.get('USER', 'notflash') != 'flash':
-    #     energy_test = AshreaEnergyTestData()
-    #     reg.submit(energy_test.data, energy_test.data['row_id'])
 
 def tree_model():
     energy = AshreaEnergyData()
@@ -44,13 +36,12 @@ def tree_model():
     reg.fit(samples, target)
     print('busy scoring samples...')
     print('RMSLE: ', mean_squared_error(target, reg.predict(samples))**0.5)
-    # # del samples
-    # # del energy
+
     if os.environ.get('USER', 'notflash') != 'flash':
         energy_test = AshreaEnergyTestData()
         reg.submit(energy_test.data, energy_test.data['row_id'])
 
 
 if __name__ == '__main__':
-    embedding_model()
-    # tree_model()
+    # embedding_model()
+    tree_model()

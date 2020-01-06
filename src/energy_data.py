@@ -61,15 +61,11 @@ class PreProcess:
                          year=xt['timestamp'].dt.year)
 
     def transform(self, X):
-        X = self._time_mapper(X)#.drop('timestamp', axis=1)
-        # X['timestamp'] = X['timestamp'].map(lambda t: t.timestamp())
+        X = self._time_mapper(X).drop('timestamp', axis=1)
         X['meter_primary_use'] = X['meter'].map(lambda s:str(s)+'_') + X['primary_use']
         X['site_primary_use'] = X['site_id'].map(lambda s:str(s)+'_') + X['primary_use']
         X['site_meter'] = X['site_id'].map(lambda s:str(s)+'_') + X['meter'].map(str)
-        # X['floor_count'] = numpy.log(X['floor_count'])
-        # drop features with too many missing values
-        # X.drop(['year_built', 'floor_count', 'cloud_coverage'], axis=1, inplace=True)
-        return X[X[TARGET]>0].reset_index(drop=True)
+        return X
 
 class DataSplitter(object):
     """
@@ -80,12 +76,14 @@ class DataSplitter(object):
         energy = AshreaEnergyData()
         features = energy.data.drop(TARGET, axis=1)
         target = energy.data[TARGET].values
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(features, target, stratify=features['building_id'], random_state=42)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(features, target, 
+                                                                                stratify=features['building_id'], random_state=42)
 
         # free up memory
         del energy
         del features
         del target
+
 
 if __name__ == '__main__':
     energy = AshreaEnergyData()

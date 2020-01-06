@@ -1,6 +1,7 @@
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
 import numpy
 
 
@@ -38,10 +39,6 @@ class CategoricalTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, xc=None):
-        # xc['meter_primary_use'] = xc['meter'].map(lambda s:str(s)+'_') + xc['primary_use']
-        # xc['site_primary_use'] = xc['site_id'].map(lambda s:str(s)+'_') + xc['primary_use']
-        # xc['site_meter'] = xc['site_id'].map(lambda s:str(s)+'_') + xc['meter'].map(str)
-        #x_snipped = TypeSelector(type='object').transform(xc_copy).fillna('Unknown').astype('str')
         xc = xc.fillna(-999).astype('str')
         return xc
 

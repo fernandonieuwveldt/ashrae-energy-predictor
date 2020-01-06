@@ -118,7 +118,7 @@ class CatBoostModel(RegressorMixin, KaggleSubmitMixin):
                   'max_depth': 3,
                   'random_seed': self._SEED,
                   'od_type': "Iter",
-                #   'od_wait': 100,
+                  # 'od_wait': 100,
                   }
         self.regressor = CatBoostRegressor(**params)
         self.regressor.fit(train_data, eval_set=valid_data)
@@ -287,32 +287,8 @@ class ClusteredXGBModel(RegressorMixin, KaggleSubmitMixin):
                 x_train_, x_valid = group_features[train_index, :], group_features[valid_index, :]
                 y_train_, y_valid = group_target[train_index], group_target[valid_index]
 
-                # estimator = Lasso(alpha=0.1)
-                estimator =  RandomForestRegressor(n_estimators=20, max_depth=5, n_jobs=-1)  # Lasso(alpha=0.25)
-                # estimator = AdaBoostRegressor(base_estimator=DecisionTreeRegressor(max_depth=3), n_estimators=5)
-                # estimator = KNeighborsRegressor(n_neighbors=5)
+                estimator =  RandomForestRegressor(n_estimators=20, max_depth=5, n_jobs=-1)
                 estimator.fit(x_train_, y_train_)
-
-                # nr_cat_features = int(numpy.sum(xtrain.max(axis=0) == 1))
-                # cat_features = list(range(nr_cat_features))
-                # train_data = Pool(data=x_train_,
-                #                   label=y_train_,
-                #                   cat_features=cat_features)
-                # valid_data = Pool(data=x_valid,
-                #                   label=y_valid,
-                #                   cat_features=cat_features)
-                # params = {'loss_function': 'RMSE',
-                #           'eval_metric': 'RMSE',
-                #           'cat_features': cat_features,
-                #           'iterations': 100,
-                #           'verbose': 10,
-                #           'max_depth': 3,
-                #           'random_seed': self._SEED,
-                #           'od_type': "Iter",
-                #           }
-                          
-                # estimator = CatBoostRegressor(**params)
-                # estimator.fit(train_data, eval_set=valid_data)
 
                 self.split_estimators[name].append(estimator)
                 self.split_transformers[name].append(group_transformer)

@@ -14,7 +14,7 @@ from keras.losses import mean_squared_error as mse_loss
 from constants import EMBEDDING_FEATURES, NUMERICAL_FEATURES, CATEGORICAL_FEATURES, TARGET
 from sklearn.pipeline import FeatureUnion, Pipeline
 from transformers import NumericalTransformer, CategoricalTransformer, GroupSelector, \
-    EmbeddingTransformer, MultiColumnLabelEncoder, EmbeddingTransformer, TypeSelector
+    EmbeddingTransformer, MultiColumnLabelEncoder, TypeSelector, GroupScaler
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
@@ -166,9 +166,9 @@ class EmbeddingBasedRegressor:
 
         return model
 
-    def _fit_single_set(self, x_train=None, y_train=None, x_val=None, y_val=None):
+    def _fit(self, x_train=None, y_train=None, x_val=None, y_val=None):
         """
-        Fit neural net model
+        Fit Single neural net model
 
         :param x_train: pandas data_frame
         :param y_train: training targets
@@ -204,6 +204,12 @@ class EmbeddingBasedRegressor:
         del x_val
 
     def fit(self, x_train=None, y_train=None):
+        """
+        Fit on multiple folds of the data
+
+        :param x_train: pandas data_frame
+        :param y_train: training targets  
+        """
         self.transformers = []
         self.estimators = []
 
@@ -256,7 +262,7 @@ class EmbeddingBasedRegressor:
         del x_train, x_train_, x_val 
 
 
-    def predict_single_model(self, x_test=None):
+    def _predict(self, x_test=None):
         """
         Loads best model for prediction
 

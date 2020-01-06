@@ -15,12 +15,10 @@ TRAIN_FEATURES = ['building_id', 'meter', 'timestamp', 'meter_reading']
 
 ENERGY_FEATURES = BUILDING_FEATURES+WEATHER_FEATURES+TRAIN_FEATURES
 
-CATEGORICAL_FEATURES = ['building_id', 'meter', 'site_id', 'primary_use', 'hour', 'day', 'week']
-                        # 'meter_primary_use', 'site_primary_use', 'site_meter']
+CATEGORICAL_FEATURES = ['building_id', 'meter', 'site_id', 'primary_use', 'hour', 'day', 'week',
+                        'meter_primary_use', 'site_primary_use', 'site_meter']
 NUMERICAL_FEATURES = ['air_temperature', 'dew_temperature', 'precip_depth_1_hr', 'floor_count',
                       'sea_level_pressure', 'wind_speed', 'square_feet', 'wind_direction']
 EMBEDDING_FEATURES = ['primary_use', 'building_id', 'meter', 'site_id', 'hour', 'day', 'week', 'year']
-
-# CATEGORICAL_FEATURES = CATEGORICAL_FEATURES - EMBEDDING_FEATURES
 
 TARGET = 'meter_reading'
