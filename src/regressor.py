@@ -313,9 +313,8 @@ class ClusteredXGBModel(RegressorMixin, KaggleSubmitMixin):
 
 class LinearModel(RegressorMixin, KaggleSubmitMixin):
     """
-    Bagging model with Randomforest as base estimator
+    Lasso model
     """
-
     def __init__(self):
         self.energy_transformer = EnergyFeatureBuilder()
         self.regressor = None
